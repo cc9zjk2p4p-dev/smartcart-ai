@@ -51,15 +51,17 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:8px}
 
 <section class="card">
  <h2>📷 Scan a price label or receipt</h2>
- <p class="muted">Take a photo or choose one from your iPhone. Text recognition runs in your browser using Tesseract.js; the photo is processed on-device after the OCR library loads.</p>
+ <p class="muted">Choose a clear photo of <strong>one receipt at a time</strong>. The scanner looks for multiple item lines and prices. Check the results before adding.</p>
  <label for="photo">Choose / take photo</label>
  <input id="photo" type="file" accept="image/*" capture="environment">
  <div class="row" style="margin-top:10px"><button id="scanBtn" class="secondary" disabled>Read text from photo</button><span class="muted small" id="libraryState">Loading text reader…</span></div>
  <div id="scanStatus" class="muted"></div>
+ <p class="muted small">Photo tip: fill the frame with one receipt, keep it flat and upright, avoid shadows, and make sure item descriptions and right-hand prices are sharp. If you photograph two receipts together, crop to one receipt first in Photos.</p>
  <div id="scanResults" class="hidden">
-  <label for="ocrName">Detected product name</label><input id="ocrName" type="text" placeholder="Edit product name">
-  <label for="ocrPrice">Detected price (NZD)</label><input id="ocrPrice" type="number" step="0.01" min="0" placeholder="0.00">
-  <button id="addScanBtn" style="width:100%;margin-top:10px">Add scanned item</button>
+  <div class="row between"><strong id="scanCount">Items found</strong><button id="selectAllBtn" class="ghost" type="button">Select all</button></div>
+  <p class="muted small">OCR suggestions can be wrong. Edit names and prices, untick anything that is not a purchased item, then add the checked items.</p>
+  <div id="receiptRows"></div>
+  <button id="addScanBtn" style="width:100%;margin-top:12px">Add selected items to cart</button>
  </div>
 </section>
 
@@ -106,22 +108,70 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:8px}
  $('cartList').onclick=e=>{const d=e.target.dataset.del;if(d!==undefined){items.splice(Number(d),1);render();}};
  $('cartList').onchange=e=>{const d=e.target.dataset.done;if(d!==undefined){items[Number(d)].done=e.target.checked;render();}};
  $('photo').onchange=e=>{photoFile=e.target.files[0]||null;$('scanBtn').disabled=!photoFile;$('scanStatus').textContent=photoFile?'Photo ready. Tap “Read text from photo”.':'';$('scanResults').classList.add('hidden');};
+
+ function parseReceiptLines(ocrLines){
+  const rows=[]; let pending='';
+  const skip=/^(pak.?n.?save|woolworths|new world|countdown|supermarket|tax invoice|credit note|gst|phone|ph\s*:|order online|go to |www\.|subtotal|sub total|total|balance due|eftpos|visa|debit|credit|purchase|approved|auth code|card|aid|tvr|arqc|psn|change|cash|thank you|customer copy|\*+)/i;
+  const moneyRe=/(?:\$\s*)?\b\d{1,4}\.\d{2}\b/g;
+  for(const raw of ocrLines){
+   let line=raw.replace(/\s+/g,' ').trim();
+   if(!line) continue;
+   if(skip.test(line)){pending='';continue;}
+   // Unit-price lines (for example, $7.29/kg) are not the extended item price.
+   if(/\/\s*(?:kg|100g|l|ea)\b/i.test(line) && !/\d+\.\d{2}.*\d+\.\d{2}/.test(line)) continue;
+   // Negative amounts are discounts/credits, not purchased products.
+   if(/-\s*\$?\s*\d+\.\d{2}/.test(line)) continue;
+   const amounts=[...line.matchAll(moneyRe)].map(m=>({value:Number(m[0].replace('$','').trim()),index:m.index}));
+   if(amounts.length){
+    const last=amounts[amounts.length-1];
+    if(!Number.isFinite(last.value)||last.value<=0||last.value>5000) continue;
+    let name=line.slice(0,last.index).replace(/[|*_]+/g,' ').replace(/\s+/g,' ').trim();
+    name=name.replace(/^\d+(?:\.\d+)?\s*(?:kg|g|ea|@)?\s*/i,'').trim();
+    if(!name || /^[\d\s@.$/kgL-]+$/i.test(name)) name=pending;
+    pending='';
+    if(name && name.length>=2 && /[a-zA-Z]/.test(name) && !skip.test(name) && !/\b(?:subtotal|balance due|total|cash|change|savings)\b/i.test(name)){
+     rows.push({name:name.slice(0,90),price:last.value,selected:true});
+    }
+   }else{
+    const cleaned=line.replace(/[|*_]+/g,' ').trim();
+    if(/[a-zA-Z]{3,}/.test(cleaned)&&!skip.test(cleaned)&&!/\b(?:subtotal|balance due|total|eftpos|visa|debit|approved)\b/i.test(cleaned)) pending=cleaned.slice(0,90);
+   }
+  }
+  return rows.filter((r,i,a)=>a.findIndex(x=>x.name.toLowerCase()===r.name.toLowerCase()&&x.price===r.price)===i);
+ }
+ function renderReceiptRows(rows){
+  $('receiptRows').innerHTML=rows.map((r,i)=>`<div class="item" style="align-items:flex-start"><input type="checkbox" data-receipt-check="${i}" ${r.selected?'checked':''} aria-label="Select ${escapeHtml(r.name)}" style="margin-top:13px"><div class="item-main"><label style="margin:0 0 4px">Product</label><input type="text" data-receipt-name="${i}" value="${escapeHtml(r.name)}"><label style="margin:7px 0 4px">Price (NZD)</label><input type="number" min="0" step="0.01" inputmode="decimal" data-receipt-price="${i}" value="${r.price.toFixed(2)}"></div></div>`).join('');
+  $('scanCount').textContent=rows.length+' possible item'+(rows.length===1?'':'s')+' found';
+  $('scanResults').classList.remove('hidden');
+ }
+ let receiptRows=[];
+ $('receiptRows').addEventListener('input',e=>{
+  if(e.target.dataset.receiptName!==undefined) receiptRows[Number(e.target.dataset.receiptName)].name=e.target.value;
+  if(e.target.dataset.receiptPrice!==undefined) receiptRows[Number(e.target.dataset.receiptPrice)].price=Number(e.target.value);
+ });
+ $('receiptRows').addEventListener('change',e=>{
+  if(e.target.dataset.receiptCheck!==undefined) receiptRows[Number(e.target.dataset.receiptCheck)].selected=e.target.checked;
+ });
+ $('selectAllBtn').onclick=()=>{receiptRows.forEach(r=>r.selected=true);renderReceiptRows(receiptRows);};
  $('scanBtn').onclick=async()=>{
   if(!photoFile||!window.Tesseract){$('scanStatus').textContent='Text reader is unavailable. Check your internet connection and reload the page.';return;}
-  $('scanBtn').disabled=true;$('scanStatus').textContent='Reading photo… This may take a little while.';
+  $('scanBtn').disabled=true;$('scanStatus').textContent='Reading receipt… This may take a little while.';
   try{
-   const result=await Tesseract.recognize(photoFile,'eng',{logger:m=>{if(m.status==='recognizing text')$('scanStatus').textContent='Reading text… '+Math.round((m.progress||0)*100)+'%';}});
-   const text=result.data.text||'';const lines=text.split(/\n/).map(x=>x.trim()).filter(Boolean);
-   const priceMatches=[...text.matchAll(/(?:\$|NZD\s*)?(\d{1,3}\.\d{2})/gi)].map(m=>Number(m[1])).filter(n=>n>0&&n<10000);
-   const name=lines.find(l=>/[a-zA-Z]{3,}/.test(l)&&!/\d+\.\d{2}/.test(l))||'Scanned item';
-   $('ocrName').value=name.replace(/[^a-zA-Z0-9 &'(),.-]/g,'').slice(0,70);
-   $('ocrPrice').value=priceMatches.length?Math.min(...priceMatches).toFixed(2):'';
-   $('scanResults').classList.remove('hidden');
-   $('scanStatus').textContent=priceMatches.length?'Text recognised. Check the suggested name and price before adding.':'Text recognised, but no clear price was found. Enter the price manually.';
-  }catch(err){$('scanStatus').textContent='Could not read this image. Try a clearer, well-lit photo or enter the item manually.';}
+   const result=await Tesseract.recognize(photoFile,'eng',{logger:m=>{if(m.status==='recognizing text')$('scanStatus').textContent='Reading receipt… '+Math.round((m.progress||0)*100)+'%';}});
+   const lines=(result.data.lines||[]).map(l=>l.text||'').filter(Boolean);
+   receiptRows=parseReceiptLines(lines);
+   if(!receiptRows.length) receiptRows=parseReceiptLines((result.data.text||'').split(/\n/));
+   if(receiptRows.length){renderReceiptRows(receiptRows);$('scanStatus').textContent='Found possible purchase lines. Review every item and price before adding.';}
+   else{$('scanResults').classList.add('hidden');$('scanStatus').textContent='I could read some text, but could not confidently match products to prices. Try a closer, straight-on photo of just one receipt, or add items manually.';}
+  }catch(err){$('scanStatus').textContent='Could not read this image. Check your internet connection and try a clear, well-lit photo.';}
   $('scanBtn').disabled=false;
  };
- $('addScanBtn').onclick=()=>{add($('ocrName').value,$('ocrPrice').value);$('scanResults').classList.add('hidden');$('photo').value='';photoFile=null;$('scanBtn').disabled=true;$('scanStatus').textContent='';};
+ $('addScanBtn').onclick=()=>{
+  const selected=receiptRows.filter(r=>r.selected&&r.name.trim()&&Number.isFinite(Number(r.price))&&Number(r.price)>0);
+  if(!selected.length){alert('Select at least one item with a valid price.');return;}
+  selected.forEach(r=>items.push({name:r.name.trim(),price:Number(r.price),done:false}));
+  render();receiptRows=[];$('scanResults').classList.add('hidden');$('photo').value='';photoFile=null;$('scanBtn').disabled=true;$('scanStatus').textContent=selected.length+' item'+(selected.length===1?'':'s')+' added. Please check your cart.';
+ };
  $('libraryState').textContent=window.Tesseract?'Text reader ready':'Text reader needs internet';
  if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
  render();
