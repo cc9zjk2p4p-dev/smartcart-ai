@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#176b50">
+<title>SmartCart AI</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+:root{color-scheme:light;--green:#176b50;--green2:#e8f4ee;--ink:#17231e;--muted:#64736b;--line:#dce5df;--bg:#f5f8f6;--white:#fff;--red:#b33b32}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{background:var(--green);color:#fff;padding:calc(16px + env(safe-area-inset-top)) 18px 18px}
+header h1{font-size:24px;margin:0 0 4px}header p{margin:0;color:#d8eee4;font-size:13px}
+main{max-width:720px;margin:auto;padding:16px 14px calc(28px + env(safe-area-inset-bottom))}
+.card{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px;box-shadow:0 2px 8px #153c2510}
+h2{font-size:18px;margin:0 0 12px}.muted{color:var(--muted);font-size:13px}.row{display:flex;gap:10px;align-items:center}.row>*{min-width:0}.between{justify-content:space-between}
+label{display:block;font-size:13px;font-weight:650;margin:10px 0 5px}input,select,button{font:inherit}input[type=text],input[type=number],select{width:100%;padding:12px;border:1px solid #cbd8d0;border-radius:10px;background:#fff;color:var(--ink)}
+input[type=range]{width:100%;accent-color:var(--green)}
+button{border:0;border-radius:10px;padding:11px 14px;background:var(--green);color:white;font-weight:650;cursor:pointer}
+button.secondary{background:var(--green2);color:var(--green)}button.ghost{background:transparent;color:var(--green);padding:6px 8px}button.danger{background:#fff0ee;color:var(--red)}
+button:disabled{opacity:.5}.metric{font-size:27px;font-weight:750;letter-spacing:-.5px}.progress{height:10px;border-radius:20px;background:#e7eee9;overflow:hidden;margin:10px 0}.progress span{display:block;height:100%;background:var(--green);width:0}
+.item{display:flex;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid #edf1ee}.item:last-child{border:0}.item-main{flex:1}.item-name{font-weight:650}.item-meta{font-size:12px;color:var(--muted);margin-top:3px}.price{font-weight:700;white-space:nowrap}.done .item-name{text-decoration:line-through;color:#89948d}
+.pill{font-size:11px;border-radius:20px;background:var(--green2);color:var(--green);padding:4px 8px;display:inline-block}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.notice{padding:11px;background:#f2f6f3;border-radius:10px;font-size:13px;color:#45564c;line-height:1.45}
+#scanStatus{margin-top:10px;white-space:pre-wrap}.small{font-size:12px}.empty{text-align:center;padding:18px;color:var(--muted)}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:8px}
+.hidden{display:none!important}
+@media(min-width:620px){main{padding-top:22px}.grid2{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header><h1>🛒 SmartCart AI</h1><p>Your personal shopping companion · Prices in NZD</p></header>
+<main>
+<section class="card">
+ <div class="row between"><div><div class="muted">Shopping budget</div><div class="metric" id="remaining">$0.00 left</div></div><span class="pill" id="budgetPill">Budget</span></div>
+ <label for="budget">Set your budget: <strong id="budgetLabel">$100.00</strong></label>
+ <input id="budget" type="range" min="10" max="500" step="5" value="100">
+ <div class="progress"><span id="progress"></span></div>
+ <div class="row between muted"><span id="spentLabel">$0.00 spent</span><span id="budgetPct">0% used</span></div>
+</section>
+
+<section class="card">
+ <h2>Add an item</h2>
+ <div class="grid2">
+  <div><label for="itemName">Product</label><input id="itemName" type="text" placeholder="e.g. Milk 2L"></div>
+  <div><label for="itemPrice">Price (NZD)</label><input id="itemPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="4.50"></div>
+ </div>
+ <div class="row" style="margin-top:12px"><button id="addBtn" style="flex:1">Add to cart</button><button id="clearBtn" class="secondary">Clear cart</button></div>
+</section>
+
+<section class="card">
+ <h2>📷 Scan a price label or receipt</h2>
+ <p class="muted">Take a photo or choose one from your iPhone. Text recognition runs in your browser using Tesseract.js; the photo is processed on-device after the OCR library loads.</p>
+ <label for="photo">Choose / take photo</label>
+ <input id="photo" type="file" accept="image/*" capture="environment">
+ <div class="row" style="margin-top:10px"><button id="scanBtn" class="secondary" disabled>Read text from photo</button><span class="muted small" id="libraryState">Loading text reader…</span></div>
+ <div id="scanStatus" class="muted"></div>
+ <div id="scanResults" class="hidden">
+  <label for="ocrName">Detected product name</label><input id="ocrName" type="text" placeholder="Edit product name">
+  <label for="ocrPrice">Detected price (NZD)</label><input id="ocrPrice" type="number" step="0.01" min="0" placeholder="0.00">
+  <button id="addScanBtn" style="width:100%;margin-top:10px">Add scanned item</button>
+ </div>
+</section>
+
+<section class="card">
+ <div class="row between"><h2 style="margin:0">Your cart</h2><span class="pill" id="itemCount">0 items</span></div>
+ <div id="cartList" class="empty">Your cart is empty. Add your first item above.</div>
+ <div class="row between" style="padding-top:12px;border-top:1px solid var(--line)"><strong>Cart total</strong><strong class="metric" style="font-size:21px" id="cartTotal">$0.00</strong></div>
+</section>
+
+<section class="card">
+ <h2>✨ Smart shopping tips</h2>
+ <div id="insight" class="notice">Add a few items and SmartCart will help you keep an eye on your budget.</div>
+ <p class="muted small" style="margin-bottom:0">Store comparisons and special prices are not connected to live supermarket feeds. Always check the shelf price before buying.</p>
+</section>
+<footer>Your cart and preferences are saved on this device only. No account or SmartCart server is used.</footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+(()=>{
+ const $=id=>document.getElementById(id);
+ const money=n=>new Intl.NumberFormat('en-NZ',{style:'currency',currency:'NZD'}).format(Number(n)||0);
+ let items=[]; let photoFile=null; let budget=100;
+ try{const s=JSON.parse(localStorage.getItem('smartcart-v1')||'{}');items=Array.isArray(s.items)?s.items:[];budget=Number(s.budget)||100;}catch(e){}
+ const save=()=>localStorage.setItem('smartcart-v1',JSON.stringify({items,budget}));
+ const total=()=>items.reduce((a,x)=>a+(Number(x.price)||0),0);
+ function render(){
+  const sum=total(),left=budget-sum,pct=budget?Math.min(100,sum/budget*100):0;
+  $('remaining').textContent=money(left)+' left';$('remaining').style.color=left<0?'#b33b32':'var(--ink)';
+  $('budget').value=budget;$('budgetLabel').textContent=money(budget);$('progress').style.width=pct+'%';
+  $('spentLabel').textContent=money(sum)+' spent';$('budgetPct').textContent=Math.round(pct)+'% used';
+  $('budgetPill').textContent=left<0?'Over budget':left<budget*.2?'Nearly there':'On track';
+  $('cartTotal').textContent=money(sum);$('itemCount').textContent=items.length+' item'+(items.length===1?'':'s');
+  if(!items.length){$('cartList').className='empty';$('cartList').textContent='Your cart is empty. Add your first item above.';}
+  else{$('cartList').className='';$('cartList').innerHTML=items.map((x,i)=>`<div class="item ${x.done?'done':''}"><input type="checkbox" aria-label="Mark ${escapeHtml(x.name)} purchased" data-done="${i}" ${x.done?'checked':''}><div class="item-main"><div class="item-name">${escapeHtml(x.name)}</div><div class="item-meta">${x.done?'Purchased':'To buy'}</div></div><div class="price">${money(x.price)}</div><button class="ghost" data-del="${i}" aria-label="Remove item">✕</button></div>`).join('');}
+  let tip=items.length===0?'Add a few items and SmartCart will help you keep an eye on your budget.':left<0?`You're ${money(-left)} over budget. Consider removing a non-essential item or checking for a lower shelf price.`:left<budget*.2?`You have ${money(left)} remaining. Check unit prices and specials before adding more.`:`You're ${money(left)} under budget. Compare unit prices (for example, price per 100g or per litre) to spot better value.`;
+  $('insight').textContent=tip;save();
+ }
+ function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+ function add(name,price){name=name.trim();price=Number(price);if(!name||!Number.isFinite(price)||price<0){alert('Enter a product name and a valid price.');return;}items.push({name,price,done:false});$('itemName').value='';$('itemPrice').value='';render();}
+ $('addBtn').onclick=()=>add($('itemName').value,$('itemPrice').value);
+ $('itemPrice').addEventListener('keydown',e=>{if(e.key==='Enter')$('addBtn').click()});
+ $('budget').oninput=e=>{budget=Number(e.target.value);render();};
+ $('clearBtn').onclick=()=>{if(items.length&&confirm('Remove all items from your cart?')){items=[];render();}};
+ $('cartList').onclick=e=>{const d=e.target.dataset.del;if(d!==undefined){items.splice(Number(d),1);render();}};
+ $('cartList').onchange=e=>{const d=e.target.dataset.done;if(d!==undefined){items[Number(d)].done=e.target.checked;render();}};
+ $('photo').onchange=e=>{photoFile=e.target.files[0]||null;$('scanBtn').disabled=!photoFile;$('scanStatus').textContent=photoFile?'Photo ready. Tap “Read text from photo”.':'';$('scanResults').classList.add('hidden');};
+ $('scanBtn').onclick=async()=>{
+  if(!photoFile||!window.Tesseract){$('scanStatus').textContent='Text reader is unavailable. Check your internet connection and reload the page.';return;}
+  $('scanBtn').disabled=true;$('scanStatus').textContent='Reading photo… This may take a little while.';
+  try{
+   const result=await Tesseract.recognize(photoFile,'eng',{logger:m=>{if(m.status==='recognizing text')$('scanStatus').textContent='Reading text… '+Math.round((m.progress||0)*100)+'%';}});
+   const text=result.data.text||'';const lines=text.split(/\n/).map(x=>x.trim()).filter(Boolean);
+   const priceMatches=[...text.matchAll(/(?:\$|NZD\s*)?(\d{1,3}\.\d{2})/gi)].map(m=>Number(m[1])).filter(n=>n>0&&n<10000);
+   const name=lines.find(l=>/[a-zA-Z]{3,}/.test(l)&&!/\d+\.\d{2}/.test(l))||'Scanned item';
+   $('ocrName').value=name.replace(/[^a-zA-Z0-9 &'(),.-]/g,'').slice(0,70);
+   $('ocrPrice').value=priceMatches.length?Math.min(...priceMatches).toFixed(2):'';
+   $('scanResults').classList.remove('hidden');
+   $('scanStatus').textContent=priceMatches.length?'Text recognised. Check the suggested name and price before adding.':'Text recognised, but no clear price was found. Enter the price manually.';
+  }catch(err){$('scanStatus').textContent='Could not read this image. Try a clearer, well-lit photo or enter the item manually.';}
+  $('scanBtn').disabled=false;
+ };
+ $('addScanBtn').onclick=()=>{add($('ocrName').value,$('ocrPrice').value);$('scanResults').classList.add('hidden');$('photo').value='';photoFile=null;$('scanBtn').disabled=true;$('scanStatus').textContent='';};
+ $('libraryState').textContent=window.Tesseract?'Text reader ready':'Text reader needs internet';
+ if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
+ render();
+})();
+</script>
+</body></html>
